@@ -5,6 +5,7 @@ import {
   BookMarked,
   BookCopy,
   BookOpenText,
+  Bot,
   Check,
   CheckCircle2,
   ChevronRight,
@@ -15,6 +16,7 @@ import {
   ExternalLink,
   FileClock,
   FolderKanban,
+  FolderOpen,
   GraduationCap,
   History,
   Home,
@@ -25,6 +27,10 @@ import {
   ListChecks,
   LoaderCircle,
   MessageSquareText,
+  Moon,
+  Palette,
+  Plus,
+  Copy,
   RotateCcw,
   Save,
   SearchCheck,
@@ -32,18 +38,23 @@ import {
   ShieldCheck,
   Sparkles,
   Target,
+  Upload,
+  WandSparkles,
   X,
 } from 'lucide-react'
 import { seedState } from './data/seed'
 import { generateFeedback } from './lib/feedback'
-import { cloneSeedState, createId, downloadWorkspace, loadWorkspace, saveWorkspace } from './lib/storage'
+import { cloneSeedState, createId, downloadWorkspace, importMarkdownReadings, loadWorkspace, saveWorkspace, syncObsidianVault } from './lib/storage'
 import type {
   ActivityLog,
   DecisionStatus,
   ExpressionCard,
   FeedbackItem,
   KnowledgeSource,
+  ProjectTemplate,
+  QualityCheck,
   ReadingItem,
+  TermEntry,
   TranslationTask,
   ViewKey,
   WorkspaceState,
@@ -51,6 +62,7 @@ import type {
 
 const navigation: Array<{ key: ViewKey; label: string; icon: typeof Home }> = [
   { key: 'overview', label: '学习总览', icon: Home },
+  { key: 'projects', label: '项目与模板', icon: FolderKanban },
   { key: 'reading', label: '译学晨读', icon: BookOpenText },
   { key: 'studio', label: '翻译工坊', icon: Languages },
   { key: 'library', label: '知识书架', icon: Database },
@@ -60,10 +72,14 @@ const navigation: Array<{ key: ViewKey; label: string; icon: typeof Home }> = [
 ]
 
 const stageMeta = {
-  draft: { label: '初译', step: 1 },
-  feedback: { label: '反馈决策', step: 2 },
-  revision: { label: '修订反思', step: 3 },
-  complete: { label: '已归档', step: 4 },
+  setup: { label: '项目配置', step: 1 },
+  terms: { label: '术语准备', step: 2 },
+  draft: { label: '批量初译', step: 3 },
+  feedback: { label: '人工审校', step: 4 },
+  quality: { label: 'LQA 质检', step: 5 },
+  consistency: { label: '一致性检验', step: 6 },
+  reflection: { label: '复盘反思', step: 7 },
+  complete: { label: '已归档', step: 8 },
 } as const
 
 const roleIcon = {
@@ -89,6 +105,27 @@ function App() {
   useEffect(() => saveWorkspace(workspace), [workspace])
 
   useEffect(() => {
+    const dark = workspace.settings.theme === 'dark' || (workspace.settings.theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+    document.documentElement.dataset.accent = workspace.settings.accent
+  }, [workspace.settings.theme, workspace.settings.accent])
+
+  useEffect(() => {
+    if (!workspace.settings.shortcutsEnabled) return
+    const views: ViewKey[] = ['overview', 'projects', 'reading', 'studio', 'library', 'notebook', 'logs', 'settings']
+    const onKey = (event: KeyboardEvent) => {
+      if (!event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) return
+      const index = Number(event.key) - 1
+      if (index >= 0 && index < views.length) {
+        event.preventDefault()
+        setActiveView(views[index])
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [workspace.settings.shortcutsEnabled])
+
+  useEffect(() => {
     if (!toast) return
     const timer = window.setTimeout(() => setToast(''), 2600)
     return () => window.clearTimeout(timer)
@@ -112,6 +149,27 @@ function App() {
     }))
   }
 
+  const updateTemplate = (templateId: string, patch: Partial<ProjectTemplate>) => {
+    setWorkspace((current) => ({
+      ...current,
+      templates: current.templates.map((template) => template.id === templateId ? { ...template, ...patch } : template),
+    }))
+  }
+
+  const createTaskFromTemplate = (template: ProjectTemplate) => {
+    const task: TranslationTask = {
+      id: createId('task'), readingId: '', title: `${template.name}项目`, sourceText: '', sourceName: '用户创建',
+      templateId: template.id, sourceLanguage: template.sourceLanguage, targetLanguage: template.targetLanguage,
+      brief: template.prompts.translation, audience: template.audience, terms: [], initialTranslation: '', revisedTranslation: '',
+      qualityChecks: [], consistencyNotes: '', reflection: '', stage: 'setup', feedback: [],
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    }
+    setWorkspace((current) => ({ ...current, tasks: [task, ...current.tasks] }))
+    setActiveTaskId(task.id)
+    setActiveView('studio')
+    setToast('项目已创建，请补充原文和任务信息')
+  }
+
   const startReading = (reading: ReadingItem) => {
     const existing = workspace.tasks.find((task) => task.readingId === reading.id && task.stage !== 'complete')
     if (existing) {
@@ -121,6 +179,7 @@ function App() {
       return
     }
 
+    const template = workspace.templates[0]
     const task: TranslationTask = {
       id: createId('task'),
       readingId: reading.id,
@@ -128,12 +187,18 @@ function App() {
       sourceText: reading.sourceText,
       sourceName: reading.sourceName,
       sourceUrl: reading.sourceUrl,
+      templateId: template?.id,
+      sourceLanguage: template?.sourceLanguage ?? '英语（en）',
+      targetLanguage: template?.targetLanguage ?? '简体中文（zh-CN）',
       brief: reading.prompt,
       audience: workspace.settings.primaryAudience,
+      terms: [],
       initialTranslation: '',
       revisedTranslation: '',
+      qualityChecks: [],
+      consistencyNotes: '',
       reflection: '',
-      stage: 'draft',
+      stage: 'setup',
       feedback: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -227,8 +292,21 @@ function App() {
       setToast('请先处理每一条反馈')
       return
     }
-    updateTask(task.id, { stage: 'revision' })
-    setToast('反馈决策已保存，进入修订')
+    if (task.revisedTranslation.trim().length < 8) {
+      setToast('请先完成审校后的修订译文')
+      return
+    }
+    const sourceNumbers = task.sourceText.match(/\d+(?:[.,]\d+)*/g) ?? []
+    const targetNumbers = task.revisedTranslation.match(/\d+(?:[.,]\d+)*/g) ?? []
+    const untranslated = task.revisedTranslation.match(/\b[A-Za-z]{5,}\b/g) ?? []
+    const checks: QualityCheck[] = [
+      { id: createId('qa'), label: '数字完整性', detail: sourceNumbers.join('|') === targetNumbers.join('|') ? '源文与译文数字序列一致。' : '数字序列可能不一致，请人工核对。', status: sourceNumbers.join('|') === targetNumbers.join('|') ? 'pass' : 'warning' },
+      { id: createId('qa'), label: '未翻译片段', detail: untranslated.length ? `发现可能遗留的源语言片段：${untranslated.slice(0, 6).join('、')}` : '未发现明显的长英文残留。', status: untranslated.length ? 'warning' : 'pass' },
+      { id: createId('qa'), label: '术语覆盖', detail: task.terms.filter((term) => term.status === 'approved' && term.target && !task.revisedTranslation.includes(term.target)).length ? '部分已批准译名未出现在修订稿中。' : '已批准术语未发现明显缺失。', status: task.terms.some((term) => term.status === 'approved' && term.target && !task.revisedTranslation.includes(term.target)) ? 'warning' : 'pass' },
+      { id: createId('qa'), label: '译文长度', detail: task.revisedTranslation.length < task.sourceText.length * 0.25 ? '译文相对源文偏短，建议检查漏译。' : '长度比例未触发漏译预警。', status: task.revisedTranslation.length < task.sourceText.length * 0.25 ? 'warning' : 'pass' },
+    ]
+    updateTask(task.id, { stage: 'quality', qualityChecks: checks })
+    setToast('审校已保存，LQA 检查完成')
   }
 
   const completeTask = (task: TranslationTask) => {
@@ -351,10 +429,23 @@ function App() {
               onStartReading={startReading}
             />
           )}
+          {activeView === 'projects' && (
+            <ProjectTemplates
+              templates={workspace.templates}
+              onUpdate={updateTemplate}
+              onDuplicate={(template) => {
+                const copy = { ...template, id: createId('template'), name: `${template.name}（副本）`, prompts: { ...template.prompts }, qualityRules: [...template.qualityRules] }
+                setWorkspace((current) => ({ ...current, templates: [...current.templates, copy] }))
+                setToast('模板副本已创建')
+              }}
+              onCreateTask={createTaskFromTemplate}
+            />
+          )}
           {activeView === 'reading' && <MorningReading readings={workspace.readings} onStart={startReading} />}
           {activeView === 'studio' && (
             <Studio
               tasks={workspace.tasks}
+              templates={workspace.templates}
               activeTask={activeTask}
               onSelectTask={setActiveTaskId}
               onUpdate={updateTask}
@@ -364,6 +455,7 @@ function App() {
               onSaveExpression={saveExpression}
               onEnterRevision={enterRevision}
               onComplete={completeTask}
+              onToast={setToast}
             />
           )}
           {activeView === 'library' && <KnowledgeLibrary sources={workspace.knowledgeSources} />}
@@ -376,6 +468,19 @@ function App() {
               workspace={workspace}
               onChange={setWorkspace}
               onExport={() => downloadWorkspace(workspace)}
+              onSyncObsidian={async () => {
+                try {
+                  const result = await syncObsidianVault(workspace)
+                  setToast(result === 'synced' ? '已同步到所选 Obsidian Vault' : '浏览器不支持文件夹同步，已下载 Markdown')
+                } catch (error) {
+                  if ((error as Error).name !== 'AbortError') setToast('未能同步，请重新选择 Vault 文件夹')
+                }
+              }}
+              onImportMarkdown={async (files) => {
+                const readings = await importMarkdownReadings(files)
+                setWorkspace((current) => ({ ...current, readings: [...readings, ...current.readings] }))
+                setToast(`已导入 ${readings.length} 份 Markdown 材料`)
+              }}
               onReset={resetWorkspace}
             />
           )}
@@ -461,8 +566,8 @@ function Overview({
                 <div className="task-icon"><Languages size={24} /></div>
                 <div><span className="eyebrow">{stageMeta[activeTask.stage].label}</span><h3>{activeTask.title}</h3><p>{activeTask.brief}</p></div>
               </div>
-              <div className="mini-flow">
-                {['动态输入', '独立初译', '协同反馈', '修订反思'].map((label, index) => (
+              <div className="mini-flow workflow-mini">
+                {['配置', '术语', '初译', '审校', 'LQA', '一致性', '反思', '归档'].map((label, index) => (
                   <div key={label} className={index < stageMeta[activeTask.stage].step ? 'done' : index === stageMeta[activeTask.stage].step - 1 ? 'current' : ''}>
                     <span>{index < stageMeta[activeTask.stage].step ? <Check size={13} /> : index + 1}</span><small>{label}</small>
                   </div>
@@ -578,8 +683,50 @@ function KnowledgeLibrary({ sources }: { sources: KnowledgeSource[] }) {
   )
 }
 
-function Studio({ tasks, activeTask, onSelectTask, onUpdate, onSubmitDraft, onDecision, onReason, onSaveExpression, onEnterRevision, onComplete }: {
+function ProjectTemplates({ templates, onUpdate, onDuplicate, onCreateTask }: {
+  templates: ProjectTemplate[]
+  onUpdate: (id: string, patch: Partial<ProjectTemplate>) => void
+  onDuplicate: (template: ProjectTemplate) => void
+  onCreateTask: (template: ProjectTemplate) => void
+}) {
+  const [activeId, setActiveId] = useState(templates[0]?.id ?? '')
+  const [promptKey, setPromptKey] = useState<keyof ProjectTemplate['prompts']>('system')
+  const template = templates.find((item) => item.id === activeId) ?? templates[0]
+  if (!template) return <EmptyState icon={FolderKanban} title="还没有项目模板" text="创建模板后即可开始项目。" />
+  const promptLabels: Record<keyof ProjectTemplate['prompts'], string> = { system: '角色边界', translation: '翻译提示', terminology: '术语提示', review: '审校提示', quality: '质检提示' }
+  return (
+    <div className="stack-lg">
+      <PageIntro kicker="Project profiles" title="项目与模板" text="把领域、读者、语言方向、提示词和质检规则装进可复用模板；每个项目仍可单独调整。" />
+      <div className="template-layout">
+        <aside className="template-catalog">
+          {templates.map((item) => <button key={item.id} className={item.id === template.id ? 'template-card active' : 'template-card'} onClick={() => setActiveId(item.id)}><span>{item.domain}</span><strong>{item.name}</strong><small>{item.description}</small><i>{item.sourceLanguage} → {item.targetLanguage}</i></button>)}
+          <button className="template-add" onClick={() => onDuplicate(template)}><Plus size={17} />以当前模板新建</button>
+        </aside>
+        <section className="panel template-editor">
+          <div className="template-editor-head"><div><span>正在编辑</span><h2>{template.name}</h2></div><div><button className="button soft" onClick={() => onDuplicate(template)}><Copy size={16} />复制模板</button><button className="button primary" onClick={() => onCreateTask(template)}><FolderKanban size={16} />用此模板创建项目</button></div></div>
+          <div className="template-fields">
+            <label>模板名称<input value={template.name} onChange={(event) => onUpdate(template.id, { name: event.target.value })} /></label>
+            <label>领域<input value={template.domain} onChange={(event) => onUpdate(template.id, { domain: event.target.value })} /></label>
+            <label>源语言<input value={template.sourceLanguage} onChange={(event) => onUpdate(template.id, { sourceLanguage: event.target.value })} /></label>
+            <label>目标语言<input value={template.targetLanguage} onChange={(event) => onUpdate(template.id, { targetLanguage: event.target.value })} /></label>
+            <label className="wide">默认目标读者<input value={template.audience} onChange={(event) => onUpdate(template.id, { audience: event.target.value })} /></label>
+            <label className="wide">模板说明<textarea value={template.description} onChange={(event) => onUpdate(template.id, { description: event.target.value })} /></label>
+          </div>
+          <div className="prompt-workbench">
+            <div className="prompt-tabs">{(Object.keys(promptLabels) as Array<keyof ProjectTemplate['prompts']>).map((key) => <button key={key} className={promptKey === key ? 'active' : ''} onClick={() => setPromptKey(key)}>{promptLabels[key]}</button>)}</div>
+            <div className="prompt-editor"><label>{promptLabels[promptKey]}<small>可以直接粘贴从其他地方获得的提示词，再按项目需要修改。</small></label><textarea value={template.prompts[promptKey]} onChange={(event) => onUpdate(template.id, { prompts: { ...template.prompts, [promptKey]: event.target.value } })} /></div>
+          </div>
+          <label className="rules-editor">LQA 规则（每行一条）<textarea value={template.qualityRules.join('\n')} onChange={(event) => onUpdate(template.id, { qualityRules: event.target.value.split('\n').map((item) => item.trim()).filter(Boolean) })} /></label>
+          <p className="autosave-note"><CheckCircle2 size={15} />模板修改自动保存在当前浏览器。</p>
+        </section>
+      </div>
+    </div>
+  )
+}
+
+function Studio({ tasks, templates, activeTask, onSelectTask, onUpdate, onSubmitDraft, onDecision, onReason, onSaveExpression, onEnterRevision, onComplete, onToast }: {
   tasks: TranslationTask[]
+  templates: ProjectTemplate[]
   activeTask?: TranslationTask
   onSelectTask: (id: string) => void
   onUpdate: (id: string, patch: Partial<TranslationTask>) => void
@@ -589,16 +736,36 @@ function Studio({ tasks, activeTask, onSelectTask, onUpdate, onSubmitDraft, onDe
   onSaveExpression: (task: TranslationTask, feedback: FeedbackItem) => void
   onEnterRevision: (task: TranslationTask) => void
   onComplete: (task: TranslationTask) => void
+  onToast: (message: string) => void
 }) {
   const [submitting, setSubmitting] = useState(false)
   if (!activeTask) return <EmptyState icon={Languages} title="还没有翻译任务" text="请先从译学晨读创建任务。" />
   const task = activeTask
+  const template = templates.find((item) => item.id === task.templateId) ?? templates[0]
   const accepted = task.feedback.filter((item) => item.status === 'accepted').length
 
   const handleSubmit = async () => {
     setSubmitting(true)
     await onSubmitDraft(task)
     setSubmitting(false)
+  }
+
+  const extractTerms = () => {
+    const stop = new Set(['which', 'their', 'there', 'these', 'those', 'should', 'would', 'could', 'about', 'remain', 'when', 'people', 'information'])
+    const words = task.sourceText.match(/\b[A-Za-z][A-Za-z-]{4,}\b/g) ?? []
+    const unique = Array.from(new Set(words.map((word) => word.toLowerCase()))).filter((word) => !stop.has(word)).slice(0, 10)
+    const existing = new Set(task.terms.map((term) => term.source.toLowerCase()))
+    const additions: TermEntry[] = unique.filter((word) => !existing.has(word)).map((word) => ({ id: createId('term'), source: word, target: '', note: '机器候选，待人工核验', status: 'pending' }))
+    onUpdate(task.id, { terms: [...task.terms, ...additions] })
+    onToast(additions.length ? `已提取 ${additions.length} 个候选术语` : '没有发现新的候选术语')
+  }
+
+  const patchTerm = (id: string, patch: Partial<TermEntry>) => onUpdate(task.id, { terms: task.terms.map((term) => term.id === id ? { ...term, ...patch } : term) })
+
+  const enterTerms = () => {
+    if (!task.title.trim() || !task.sourceText.trim()) { onToast('请先填写项目名称和原文'); return }
+    onUpdate(task.id, { stage: 'terms' })
+    onToast('项目配置已保存，开始术语准备')
   }
 
   return (
@@ -609,18 +776,54 @@ function Studio({ tasks, activeTask, onSelectTask, onUpdate, onSubmitDraft, onDe
           {tasks.map((item) => <option key={item.id} value={item.id}>{item.stage === 'complete' ? '✓ ' : ''}{item.title}</option>)}
         </select>
       </div>
-      <div className="stepper">
+      <div className="stepper workflow-stepper">
         {[
-          ['初译', '独立形成第一版'],
-          ['反馈', '分角色审视'],
-          ['修订', '决定并说明'],
-          ['归档', '沉淀为证据'],
+          ['配置', '项目与模板'],
+          ['术语', '提取与核验'],
+          ['初译', '独立形成'],
+          ['审校', '人机协同'],
+          ['LQA', '规则质检'],
+          ['一致性', '术语与风格'],
+          ['反思', '迁移策略'],
+          ['归档', '过程证据'],
         ].map(([label, sub], index) => {
           const done = index + 1 < stageMeta[task.stage].step || task.stage === 'complete'
           const current = index + 1 === stageMeta[task.stage].step
           return <div key={label} className={done ? 'done' : current ? 'current' : ''}><span>{done ? <Check size={15} /> : index + 1}</span><div><strong>{label}</strong><small>{sub}</small></div></div>
         })}
       </div>
+
+      {task.stage === 'setup' && (
+        <div className="studio-grid">
+          <section className="panel setup-panel">
+            <div className="panel-label"><FolderKanban size={17} /> 项目档案</div>
+            <label>项目名称<input value={task.title} onChange={(event) => onUpdate(task.id, { title: event.target.value })} /></label>
+            <label>项目模板<select value={task.templateId ?? template?.id} onChange={(event) => { const next = templates.find((item) => item.id === event.target.value); if (next) onUpdate(task.id, { templateId: next.id, sourceLanguage: next.sourceLanguage, targetLanguage: next.targetLanguage, audience: next.audience, brief: next.prompts.translation }) }}>{templates.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+            <div className="form-pair"><label>源语言<input value={task.sourceLanguage} onChange={(event) => onUpdate(task.id, { sourceLanguage: event.target.value })} /></label><label>目标语言<input value={task.targetLanguage} onChange={(event) => onUpdate(task.id, { targetLanguage: event.target.value })} /></label></div>
+            <label>目标读者<input value={task.audience} onChange={(event) => onUpdate(task.id, { audience: event.target.value })} /></label>
+            <label>任务要求<textarea value={task.brief} onChange={(event) => onUpdate(task.id, { brief: event.target.value })} /></label>
+          </section>
+          <section className="panel setup-panel">
+            <div className="panel-label"><BookOpenText size={17} /> 原文与来源</div>
+            <label>来源名称<input value={task.sourceName} onChange={(event) => onUpdate(task.id, { sourceName: event.target.value })} /></label>
+            <label>原文<textarea className="source-input" value={task.sourceText} onChange={(event) => onUpdate(task.id, { sourceText: event.target.value })} placeholder="粘贴单段或多段原文……" /></label>
+            <div className="template-glimpse"><span>当前模板提示</span><p>{template?.prompts.system}</p></div>
+            <button className="button primary full" onClick={enterTerms}>保存配置，进入术语准备 <ArrowRight size={17} /></button>
+          </section>
+        </div>
+      )}
+
+      {task.stage === 'terms' && (
+        <div className="stack-md">
+          <section className="panel term-toolbar"><div><span className="panel-label"><SearchCheck size={17} /> 候选术语与项目术语库</span><p>自动提取只产生候选项；译名和核验说明由你确认。</p></div><div><button className="button soft" onClick={() => onUpdate(task.id, { terms: [...task.terms, { id: createId('term'), source: '', target: '', note: '', status: 'pending' }] })}><Plus size={16} />手动添加</button><button className="button primary" onClick={extractTerms}><WandSparkles size={16} />从原文提取</button></div></section>
+          <section className="panel term-table">
+            <div className="term-row term-head"><span>源语术语</span><span>首选译名</span><span>核验说明</span><span>状态</span></div>
+            {task.terms.map((term) => <div className="term-row" key={term.id}><input value={term.source} onChange={(event) => patchTerm(term.id, { source: event.target.value })} placeholder="source term" /><input value={term.target} onChange={(event) => patchTerm(term.id, { target: event.target.value })} placeholder="首选译名" /><input value={term.note} onChange={(event) => patchTerm(term.id, { note: event.target.value })} placeholder="来源／语境／待核验" /><button className={term.status === 'approved' ? 'term-status approved' : 'term-status'} onClick={() => patchTerm(term.id, { status: term.status === 'approved' ? 'pending' : 'approved' })}>{term.status === 'approved' ? <Check size={14} /> : null}{term.status === 'approved' ? '已批准' : '待核验'}</button></div>)}
+            {!task.terms.length && <EmptyState icon={SearchCheck} title="还没有候选术语" text="可以自动提取，也可以手动添加；没有关键术语时可直接继续。" />}
+          </section>
+          <div className="action-bar"><div><strong>{task.terms.filter((term) => term.status === 'approved').length}</strong> 个已批准项目术语</div><button className="button primary" onClick={() => onUpdate(task.id, { stage: 'draft' })}>进入批量初译 <ArrowRight size={17} /></button></div>
+        </div>
+      )}
 
       {task.stage === 'draft' && (
         <div className="studio-grid">
@@ -632,10 +835,11 @@ function Studio({ tasks, activeTask, onSelectTask, onUpdate, onSubmitDraft, onDe
             <div className="source-meta compact"><div><Link2 size={16} /><span><strong>{task.sourceName}</strong><small>来源信息将随任务一起归档</small></span></div>{task.sourceUrl && <a href={task.sourceUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} /></a>}</div>
           </section>
           <section className="panel editor-panel">
-            <div className="panel-label"><Languages size={17} /> 独立初译</div>
+            <div className="panel-label"><Languages size={17} /> 独立／批量初译</div>
             <div className="notice"><Info size={16} /><span>提交初译后才会显示反馈，避免 AI 提前替代你的判断。</span></div>
+            <div className="prompt-note"><Bot size={15} /><span><strong>{workspaceModelLabel(template)}</strong>{template?.prompts.translation}</span></div>
             <textarea value={task.initialTranslation} onChange={(event) => onUpdate(task.id, { initialTranslation: event.target.value })} placeholder="在这里完成你的第一版译文……" />
-            <div className="editor-foot"><span>{task.initialTranslation.length} 字</span><button className="button primary" disabled={submitting} onClick={handleSubmit}>{submitting ? <LoaderCircle className="spin" size={17} /> : <Sparkles size={17} />} 提交初译并获取反馈</button></div>
+            <div className="editor-foot"><span>{task.sourceText.split(/\n+/).filter(Boolean).length} 个文本段 · {task.initialTranslation.length} 字</span><button className="button primary" disabled={submitting} onClick={handleSubmit}>{submitting ? <LoaderCircle className="spin" size={17} /> : <Sparkles size={17} />} 提交初译并进入审校</button></div>
           </section>
         </div>
       )}
@@ -662,24 +866,34 @@ function Studio({ tasks, activeTask, onSelectTask, onUpdate, onSubmitDraft, onDe
               )
             })}
           </div>
-          <div className="action-bar"><div><strong>{accepted}</strong> 条建议将作为修订参考</div><button className="button primary" onClick={() => onEnterRevision(task)}>完成反馈决策，进入修订 <ArrowRight size={17} /></button></div>
+          <section className="panel review-editor"><div className="panel-label"><Languages size={17} /> 人工审校后的修订稿</div><textarea value={task.revisedTranslation} onChange={(event) => onUpdate(task.id, { revisedTranslation: event.target.value })} placeholder="结合已核验的建议完成修订；最终决定仍由你作出……" /></section>
+          <div className="action-bar"><div><strong>{accepted}</strong> 条建议已采纳，{task.feedback.length - accepted} 条未采纳</div><button className="button primary" onClick={() => onEnterRevision(task)}>完成审校，运行 LQA <ArrowRight size={17} /></button></div>
         </div>
       )}
 
-      {task.stage === 'revision' && (
+      {task.stage === 'quality' && (
+        <div className="stack-md">
+          <section className="panel quality-board"><div className="quality-head"><div><span className="panel-label"><ShieldCheck size={17} /> LQA 规则质检</span><h2>{task.qualityChecks.filter((item) => item.status === 'warning').length} 项需要人工复核</h2></div><small>自动检查只能发现可计算的风险，不代表译文质量已经合格。</small></div><div className="quality-list">{task.qualityChecks.map((item) => <div className={item.status} key={item.id}><span>{item.status === 'pass' ? <Check size={16} /> : <Info size={16} />}</span><div><strong>{item.label}</strong><p>{item.detail}</p></div></div>)}</div></section>
+          <div className="action-bar"><div>依据模板“{template?.name}”执行基础检查</div><button className="button primary" onClick={() => onUpdate(task.id, { stage: 'consistency' })}>完成复核，检查一致性 <ArrowRight size={17} /></button></div>
+        </div>
+      )}
+
+      {task.stage === 'consistency' && (
+        <div className="studio-grid">
+          <section className="panel consistency-panel"><div className="panel-label"><Link2 size={17} /> 术语一致性</div>{task.terms.filter((term) => term.status === 'approved').map((term) => { const used = Boolean(term.target && task.revisedTranslation.includes(term.target)); return <div className="consistency-row" key={term.id}><span className={used ? 'used' : 'missing'}>{used ? <Check size={14} /> : <Info size={14} />}</span><strong>{term.source}</strong><ArrowRight size={14} /><b>{term.target || '未填写译名'}</b><small>{used ? '终稿中已使用' : '终稿中未检出'}</small></div> })}{!task.terms.some((term) => term.status === 'approved') && <EmptyState icon={Link2} title="没有已批准术语" text="本项目不需要术语对照，仍可记录风格和专名检查。" />}</section>
+          <section className="panel reflection-panel"><div className="panel-label"><ListChecks size={17} /> 一致性检查记录</div><h2>哪些问题已经核对，哪些仍需交稿前确认？</h2><p>记录术语、专名、数字、语气或格式的一致性判断，避免把“未检出”误写为“已验证”。</p><textarea value={task.consistencyNotes} onChange={(event) => onUpdate(task.id, { consistencyNotes: event.target.value })} placeholder="例如：human agency 全文统一译为“人的能动性”；机构名称仍需核对官方中文版……" /><button className="button primary full" onClick={() => onUpdate(task.id, { stage: 'reflection' })}>保存一致性记录，进入学习反思 <ArrowRight size={17} /></button></section>
+        </div>
+      )}
+
+      {task.stage === 'reflection' && (
         <div className="studio-grid revision-grid">
-          <section className="panel editor-panel">
-            <div className="panel-label"><Languages size={17} /> 修订译文</div>
-            <div className="original-draft"><span>初译</span><p>{task.initialTranslation}</p></div>
-            <textarea value={task.revisedTranslation} onChange={(event) => onUpdate(task.id, { revisedTranslation: event.target.value })} placeholder="根据你的判断完成修订……" />
-            <div className="editor-foot"><span>已采纳 {accepted} 条建议</span><span>{task.revisedTranslation.length} 字</span></div>
-          </section>
+          <section className="panel editor-panel"><div className="panel-label"><Languages size={17} /> 初译与终稿对照</div><div className="original-draft"><span>初译</span><p>{task.initialTranslation}</p></div><div className="final-draft"><span>终稿</span><p>{task.revisedTranslation}</p></div></section>
           <section className="panel reflection-panel">
             <div className="panel-label"><GraduationCap size={17} /> 决策反思</div>
             <h2>这次修订中，最重要的一个判断是什么？</h2>
             <p>不要复述“AI 给了建议”，请说明你如何核验、取舍，以及这项判断能否迁移到下一次任务。</p>
             <textarea value={task.reflection} onChange={(event) => onUpdate(task.id, { reflection: event.target.value })} placeholder="例如：我保留了“人工监督机制”，因为目标读者需要看到责任主体……" />
-            <div className="decision-summary"><span><CheckCircle2 size={17} />采纳 {accepted}</span><span><X size={17} />拒绝 {task.feedback.length - accepted}</span><span><BookMarked size={17} />表达可进入复习</span></div>
+            <div className="decision-summary"><span><CheckCircle2 size={17} />采纳 {accepted}</span><span><ShieldCheck size={17} />LQA {task.qualityChecks.length} 项</span><span><BookMarked size={17} />表达可进入复习</span></div>
             <button className="button primary full" onClick={() => onComplete(task)}><Save size={17} />归档任务与过程记录</button>
           </section>
         </div>
@@ -698,6 +912,8 @@ function Studio({ tasks, activeTask, onSelectTask, onUpdate, onSubmitDraft, onDe
     </div>
   )
 }
+
+const workspaceModelLabel = (template?: ProjectTemplate) => template ? `${template.name}：` : '当前提示：'
 
 function Notebook({ cards, onReview, onPractice }: { cards: ExpressionCard[]; onReview: (card: ExpressionCard, remembered: boolean) => void; onPractice: (card: ExpressionCard, response: string) => void }) {
   const due = cards.filter((card) => dueToday(card.nextReviewAt))
@@ -780,16 +996,19 @@ function ProcessArchive({ workspace }: { workspace: WorkspaceState }) {
   )
 }
 
-function WorkspaceSettingsView({ workspace, onChange, onExport, onReset }: { workspace: WorkspaceState; onChange: (state: WorkspaceState) => void; onExport: () => void; onReset: () => void }) {
+function WorkspaceSettingsView({ workspace, onChange, onExport, onSyncObsidian, onImportMarkdown, onReset }: { workspace: WorkspaceState; onChange: (state: WorkspaceState) => void; onExport: () => void; onSyncObsidian: () => Promise<void>; onImportMarkdown: (files: FileList) => Promise<void>; onReset: () => void }) {
   const settings = workspace.settings
   const patch = (next: Partial<typeof settings>) => onChange({ ...workspace, settings: { ...settings, ...next } })
   return (
     <div className="stack-lg">
-      <PageIntro kicker="工作台配置" title="设置" text="首版以本地优先为原则；真实模型通过安全的服务器端端点接入。" />
+      <PageIntro kicker="Workspace preferences" title="设置" text="主题、快捷键、模型入口和本地知识库都由你控制；公开网页不会保存模型密钥。" />
       <div className="settings-grid">
         <section className="panel settings-section"><div className="settings-title"><CircleUserRound size={21} /><div><h2>学习者设置</h2><p>用于个性化界面和任务默认值。</p></div></div><label>显示名称<input value={settings.learnerName} onChange={(event) => patch({ learnerName: event.target.value })} /></label><label>主要学习对象<select value={settings.primaryAudience} onChange={(event) => patch({ primaryAudience: event.target.value as typeof settings.primaryAudience })}><option>翻译专业本科生</option><option>MTI学生</option></select></label></section>
-        <section className="panel settings-section"><div className="settings-title"><Sparkles size={21} /><div><h2>反馈引擎</h2><p>公开网页不得保存模型密钥。</p></div></div><div className="mode-switch"><button className={settings.feedbackMode === 'demo' ? 'active' : ''} onClick={() => patch({ feedbackMode: 'demo' })}><strong>演示反馈</strong><span>可重复、无需联网</span></button><button className={settings.feedbackMode === 'endpoint' ? 'active' : ''} onClick={() => patch({ feedbackMode: 'endpoint' })}><strong>安全端点</strong><span>调用自有服务器</span></button></div>{settings.feedbackMode === 'endpoint' && <label>反馈 API 地址<input type="url" value={settings.aiEndpoint} onChange={(event) => patch({ aiEndpoint: event.target.value })} placeholder="https://your-worker.example/api/feedback" /><small>端点负责保管密钥，并返回约定格式的 feedback 数组；调用失败时自动回退到演示反馈。</small></label>}<div className="security-note"><ShieldCheck size={17} />不要把 OpenAI、DeepSeek 或其他服务的 API 密钥写入 GitHub 仓库或浏览器代码。</div></section>
-        <section className="panel settings-section wide"><div className="settings-title"><Download size={21} /><div><h2>数据与研究记录</h2><p>导出任务、版本、反馈决策、表达卡和时间线。</p></div></div><div className="data-actions"><button className="button soft" onClick={onExport}><Download size={17} />导出 JSON 数据</button><button className="button danger" onClick={onReset}><RotateCcw size={17} />恢复演示数据</button></div><p className="fine-print">当前版本使用 localStorage。清理浏览器数据会删除学习记录，请在正式试用前定期导出。若未来采集学生数据，应另行完成知情同意、权限控制、匿名化和机构伦理要求。</p></section>
+        <section className="panel settings-section"><div className="settings-title"><Palette size={21} /><div><h2>界面外观</h2><p>主题和校样标记色实时生效。</p></div></div><div className="theme-choices">{(['system', 'light', 'dark'] as const).map((theme) => <button key={theme} className={settings.theme === theme ? 'active' : ''} onClick={() => patch({ theme })}><Moon size={16} /><strong>{theme === 'system' ? '跟随系统' : theme === 'light' ? '浅色' : '深色'}</strong></button>)}</div><label>校样标记色<select value={settings.accent} onChange={(event) => patch({ accent: event.target.value as typeof settings.accent })}><option value="proof">校样朱红</option><option value="teal">术语青绿</option><option value="plum">批注紫</option></select></label></section>
+        <section className="panel settings-section"><div className="settings-title"><Bot size={21} /><div><h2>AI 模型</h2><p>选择模型身份；真实调用仍需安全端点。</p></div></div><label>服务类型<select value={settings.aiProvider} onChange={(event) => patch({ aiProvider: event.target.value as typeof settings.aiProvider, feedbackMode: event.target.value === '演示模式' ? 'demo' : 'endpoint' })}><option>演示模式</option><option>OpenAI 兼容</option><option>DeepSeek</option><option>自定义</option></select></label><label>模型名称<input value={settings.aiModel} onChange={(event) => patch({ aiModel: event.target.value })} placeholder="例如 deepseek-chat" /></label>{settings.feedbackMode === 'endpoint' && <label>安全端点地址<input type="url" value={settings.aiEndpoint} onChange={(event) => patch({ aiEndpoint: event.target.value })} placeholder="https://your-worker.example/api/feedback" /><small>服务器负责保管密钥；调用失败时自动回退到演示反馈。</small></label>}<div className="security-note"><ShieldCheck size={17} />GitHub Pages 不能安全保存 API 密钥，因此这里不提供密钥输入框。</div></section>
+        <section className="panel settings-section"><div className="settings-title"><WandSparkles size={21} /><div><h2>快捷键</h2><p>减少在长流程中的鼠标切换。</p></div></div><button className={settings.shortcutsEnabled ? 'toggle-row on' : 'toggle-row'} onClick={() => patch({ shortcutsEnabled: !settings.shortcutsEnabled })}><span><strong>启用导航快捷键</strong><small>Option / Alt + 1—8 切换主要页面</small></span><i>{settings.shortcutsEnabled ? '已开启' : '已关闭'}</i></button></section>
+        <section className="panel settings-section"><div className="settings-title"><FolderOpen size={21} /><div><h2>Obsidian 知识库</h2><p>由你选择 Vault，平台只写入指定子文件夹。</p></div></div><label>同步文件夹名称<input value={settings.obsidianFolderName} onChange={(event) => patch({ obsidianFolderName: event.target.value })} /></label><div className="data-actions"><button className="button primary" onClick={() => void onSyncObsidian()}><FolderOpen size={16} />同步任务到 Vault</button><label className="button soft file-button"><Upload size={16} />导入 Markdown<input type="file" accept=".md,text/markdown" multiple onChange={(event) => { if (event.target.files?.length) void onImportMarkdown(event.target.files); event.target.value = '' }} /></label></div><p className="fine-print">Chrome、Edge 等浏览器可直接选择 Vault；不支持文件夹访问的浏览器会改为下载 Markdown。导入文件会进入“译学晨读”，平台不会扫描整个 Vault。</p></section>
+        <section className="panel settings-section wide"><div className="settings-title"><Download size={21} /><div><h2>数据与研究记录</h2><p>导出项目模板、任务版本、反馈决策、术语、LQA 与时间线。</p></div></div><div className="data-actions"><button className="button soft" onClick={onExport}><Download size={17} />导出 JSON 数据</button><button className="button danger" onClick={onReset}><RotateCcw size={17} />恢复演示数据</button></div><p className="fine-print">当前版本使用 localStorage。清理浏览器数据会删除学习记录，请在正式试用前定期导出。若未来采集学生数据，应另行完成知情同意、权限控制、匿名化和机构伦理要求。</p></section>
       </div>
     </div>
   )

@@ -1,6 +1,6 @@
-export type ViewKey = 'overview' | 'reading' | 'studio' | 'library' | 'notebook' | 'logs' | 'settings'
+export type ViewKey = 'overview' | 'projects' | 'reading' | 'studio' | 'library' | 'notebook' | 'logs' | 'settings'
 
-export type TaskStage = 'draft' | 'feedback' | 'revision' | 'complete'
+export type TaskStage = 'setup' | 'terms' | 'draft' | 'feedback' | 'quality' | 'consistency' | 'reflection' | 'complete'
 
 export type DecisionStatus = 'pending' | 'accepted' | 'rejected'
 
@@ -32,6 +32,39 @@ export interface FeedbackItem {
   meaning?: string
 }
 
+export interface TermEntry {
+  id: string
+  source: string
+  target: string
+  note: string
+  status: 'pending' | 'approved'
+}
+
+export interface QualityCheck {
+  id: string
+  label: string
+  detail: string
+  status: 'pass' | 'warning'
+}
+
+export interface ProjectTemplate {
+  id: string
+  name: string
+  domain: string
+  description: string
+  sourceLanguage: string
+  targetLanguage: string
+  audience: string
+  prompts: {
+    system: string
+    translation: string
+    terminology: string
+    review: string
+    quality: string
+  }
+  qualityRules: string[]
+}
+
 export interface TranslationTask {
   id: string
   readingId: string
@@ -39,10 +72,16 @@ export interface TranslationTask {
   sourceText: string
   sourceName: string
   sourceUrl?: string
+  templateId?: string
+  sourceLanguage: string
+  targetLanguage: string
   brief: string
   audience: string
+  terms: TermEntry[]
   initialTranslation: string
   revisedTranslation: string
+  qualityChecks: QualityCheck[]
+  consistencyNotes: string
   reflection: string
   stage: TaskStage
   feedback: FeedbackItem[]
@@ -90,9 +129,16 @@ export interface WorkspaceSettings {
   primaryAudience: '翻译专业本科生' | 'MTI学生'
   feedbackMode: 'demo' | 'endpoint'
   aiEndpoint: string
+  aiProvider: '演示模式' | 'OpenAI 兼容' | 'DeepSeek' | '自定义'
+  aiModel: string
+  theme: 'system' | 'light' | 'dark'
+  accent: 'proof' | 'teal' | 'plum'
+  shortcutsEnabled: boolean
+  obsidianFolderName: string
 }
 
 export interface WorkspaceState {
+  templates: ProjectTemplate[]
   readings: ReadingItem[]
   tasks: TranslationTask[]
   expressions: ExpressionCard[]
