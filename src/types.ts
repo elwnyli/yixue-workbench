@@ -1,4 +1,4 @@
-export type ViewKey = 'overview' | 'reading' | 'studio' | 'notebook' | 'logs' | 'settings'
+export type ViewKey = 'overview' | 'reading' | 'studio' | 'library' | 'notebook' | 'logs' | 'settings'
 
 export type TaskStage = 'draft' | 'feedback' | 'revision' | 'complete'
 
@@ -63,6 +63,19 @@ export interface ExpressionCard {
   createdAt: string
 }
 
+export interface KnowledgeSource {
+  id: string
+  title: string
+  kind: '规范' | '术语库' | '平行文本' | '课程材料'
+  organization: string
+  description: string
+  url?: string
+  language: string
+  verifiedAt: string
+  tags: string[]
+  usageNote: string
+}
+
 export interface ActivityLog {
   id: string
   type: 'task' | 'feedback' | 'decision' | 'revision' | 'expression' | 'review' | 'system'
@@ -83,6 +96,7 @@ export interface WorkspaceState {
   readings: ReadingItem[]
   tasks: TranslationTask[]
   expressions: ExpressionCard[]
+  knowledgeSources: KnowledgeSource[]
   logs: ActivityLog[]
   settings: WorkspaceSettings
 }

@@ -9,7 +9,18 @@ export const loadWorkspace = (): WorkspaceState => {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY)
     if (!raw) return cloneSeedState()
-    return JSON.parse(raw) as WorkspaceState
+    const saved = JSON.parse(raw) as Partial<WorkspaceState>
+    const defaults = cloneSeedState()
+    return {
+      ...defaults,
+      ...saved,
+      readings: saved.readings ?? defaults.readings,
+      tasks: saved.tasks ?? defaults.tasks,
+      expressions: saved.expressions ?? defaults.expressions,
+      knowledgeSources: saved.knowledgeSources ?? defaults.knowledgeSources,
+      logs: saved.logs ?? defaults.logs,
+      settings: { ...defaults.settings, ...(saved.settings ?? {}) },
+    }
   } catch {
     return cloneSeedState()
   }
@@ -23,7 +34,7 @@ export const downloadWorkspace = (state: WorkspaceState) => {
   const payload = JSON.stringify(
     {
       exportedAt: new Date().toISOString(),
-      schemaVersion: '1.0',
+      schemaVersion: '1.1',
       workspace: state,
     },
     null,

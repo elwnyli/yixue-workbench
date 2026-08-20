@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   ArrowRight,
+  Brain,
   BookMarked,
+  BookCopy,
   BookOpenText,
   Check,
   CheckCircle2,
@@ -9,6 +11,7 @@ import {
   CircleUserRound,
   Clock3,
   Download,
+  Database,
   ExternalLink,
   FileClock,
   FolderKanban,
@@ -39,6 +42,7 @@ import type {
   DecisionStatus,
   ExpressionCard,
   FeedbackItem,
+  KnowledgeSource,
   ReadingItem,
   TranslationTask,
   ViewKey,
@@ -49,8 +53,9 @@ const navigation: Array<{ key: ViewKey; label: string; icon: typeof Home }> = [
   { key: 'overview', label: '学习总览', icon: Home },
   { key: 'reading', label: '译学晨读', icon: BookOpenText },
   { key: 'studio', label: '翻译工坊', icon: Languages },
+  { key: 'library', label: '知识书架', icon: Database },
   { key: 'notebook', label: '表达手账', icon: BookMarked },
-  { key: 'logs', label: '过程档案', icon: FileClock },
+  { key: 'logs', label: '学习记忆', icon: Brain },
   { key: 'settings', label: '工作台设置', icon: Settings },
 ]
 
@@ -266,6 +271,16 @@ function App() {
     setToast(remembered ? `下次将在第 ${intervals[nextLevel]} 天复习` : '已缩短复习间隔')
   }
 
+  const recordPractice = (card: ExpressionCard, response: string) => {
+    log({
+      type: 'review',
+      title: '完成迁移练习',
+      detail: `${card.expression}：${response}`,
+      taskId: card.sourceTaskId,
+    })
+    setToast('迁移练习已写入学习记忆')
+  }
+
   const resetWorkspace = () => {
     const next = cloneSeedState()
     setWorkspace(next)
@@ -351,8 +366,9 @@ function App() {
               onComplete={completeTask}
             />
           )}
+          {activeView === 'library' && <KnowledgeLibrary sources={workspace.knowledgeSources} />}
           {activeView === 'notebook' && (
-            <Notebook cards={workspace.expressions} onReview={reviewExpression} />
+            <Notebook cards={workspace.expressions} onReview={reviewExpression} onPractice={recordPractice} />
           )}
           {activeView === 'logs' && <ProcessArchive workspace={workspace} />}
           {activeView === 'settings' && (
@@ -366,7 +382,7 @@ function App() {
         </div>
 
         <nav className="mobile-nav" aria-label="移动端导航">
-          {navigation.slice(0, 5).map((item) => {
+          {navigation.map((item) => {
             const Icon = item.icon
             return <button key={item.key} className={activeView === item.key ? 'active' : ''} onClick={() => setActiveView(item.key)}><Icon size={20} /><span>{item.label.slice(0, 2)}</span></button>
           })}
@@ -406,9 +422,9 @@ function Overview({
     <div className="stack-lg">
       <section className="hero-panel">
         <div className="hero-copy">
-          <span className="kicker"><Sparkles size={15} /> {learnerName} · 今日学习路径</span>
-          <h1>让每一次翻译，<br />都留下可复用的判断。</h1>
-          <p>从真实输入开始，先译、再评、再决定。工作台记录的不只是结果，更是你如何抵达结果。</p>
+          <span className="kicker"><span className="proof-dot" /> {learnerName} · 今日校样台</span>
+          <h1>译文会完成，<br />判断要留下。</h1>
+          <p>把源文、核验、取舍与修订摆在同一张工作台上。这里不替你交稿，只让每一次选择都有来路。</p>
           <div className="hero-actions">
             {activeTask && activeTask.stage !== 'complete' ? (
               <button className="button primary" onClick={() => onOpenTask(activeTask.id)}>继续当前任务 <ArrowRight size={17} /></button>
@@ -418,13 +434,14 @@ function Overview({
             <button className="button ghost" onClick={() => onNavigate('reading')}>浏览学习材料</button>
           </div>
         </div>
-        <div className="hero-visual" aria-hidden="true">
-          <div className="orbit orbit-one" />
-          <div className="orbit orbit-two" />
-          <div className="hero-glyph"><Languages size={52} /></div>
-          <span className="float-label label-a">先译后评</span>
-          <span className="float-label label-b">来源可溯</span>
-          <span className="float-label label-c">决策留痕</span>
+        <div className="proof-sheet" aria-hidden="true">
+          <div className="proof-head"><span>TRANSLATION PROOF</span><b>08 / 20</b></div>
+          <div className="proof-columns">
+            <div><small>SOURCE</small><p>Human oversight remains essential when automated systems influence decisions…</p></div>
+            <div><small>VERSION 02</small><p>自动化系统影响人的相关决策时，人工监督机制仍不可或缺。</p></div>
+          </div>
+          <div className="proof-note"><span>核</span><p>agency → 主体作用<br />保留责任主体</p></div>
+          <div className="proof-stamp">DECISION<br />RECORDED</div>
         </div>
       </section>
 
@@ -432,7 +449,7 @@ function Overview({
         <Metric icon={FolderKanban} label="进行中的任务" value={String(tasks.filter((task) => task.stage !== 'complete').length)} note="保持一次只专注一个任务" tone="green" />
         <Metric icon={CheckCircle2} label="已归档任务" value={String(completedCount)} note="含初译、修订和反思" tone="orange" />
         <Metric icon={LibraryBig} label="表达手账" value={String(expressions.length)} note={`${dueCount} 条等待复习`} tone="blue" />
-        <Metric icon={History} label="过程记录" value={String(tasks.reduce((sum, task) => sum + task.feedback.length, 0))} note="反馈与翻译决策" tone="sand" />
+        <Metric icon={History} label="证据节点" value={String(tasks.reduce((sum, task) => sum + task.feedback.length, 0))} note="反馈、决定与来源" tone="sand" />
       </section>
 
       <section className="two-column">
@@ -465,6 +482,12 @@ function Overview({
           <div className="tag-row">{today.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>
           <button className="button text" onClick={() => onStartReading(today)}>阅读并开始微翻译 <ArrowRight size={16} /></button>
         </div>
+      </section>
+
+      <section className="memory-ribbon">
+        <div><span>工作台记住什么</span><h2>当前任务、翻译决定、可迁移策略</h2></div>
+        <p>借鉴统一学习空间的思路，但记忆对象不是聊天内容，而是有来源、有版本、有理由的翻译过程。</p>
+        <button onClick={() => onNavigate('logs')}>查看学习记忆 <ArrowRight size={16} /></button>
       </section>
     </div>
   )
@@ -503,6 +526,54 @@ function MorningReading({ readings, onStart }: { readings: ReadingItem[]; onStar
           <button className="button primary" onClick={() => onStart(item)}>带着任务进入翻译工坊 <ArrowRight size={17} /></button>
         </article>
       </div>
+    </div>
+  )
+}
+
+function KnowledgeLibrary({ sources }: { sources: KnowledgeSource[] }) {
+  const kinds = ['全部', ...Array.from(new Set(sources.map((source) => source.kind)))]
+  const [filter, setFilter] = useState('全部')
+  const visible = filter === '全部' ? sources : sources.filter((source) => source.kind === filter)
+  const [activeId, setActiveId] = useState(sources[0]?.id ?? '')
+  const active = visible.find((source) => source.id === activeId) ?? visible[0]
+
+  return (
+    <div className="stack-lg">
+      <PageIntro kicker="来源优先" title="知识书架" text="把规范、术语库、平行文本和课程材料放在反馈之前；每条资料都保留身份、用途与核验状态。" />
+      <section className="library-toolbar">
+        <div className="kind-tabs" aria-label="资源类型">
+          {kinds.map((kind) => <button key={kind} className={filter === kind ? 'active' : ''} onClick={() => setFilter(kind)}>{kind}</button>)}
+        </div>
+        <span><Database size={15} /> {visible.length} 项资料</span>
+      </section>
+      <div className="library-layout">
+        <div className="source-catalog">
+          {visible.map((source) => (
+            <button key={source.id} className={active?.id === source.id ? 'source-card active' : 'source-card'} onClick={() => setActiveId(source.id)}>
+              <span className={`source-kind kind-${source.kind}`}>{source.kind}</span>
+              <strong>{source.title}</strong>
+              <small>{source.organization}</small>
+              <div>{source.tags.slice(0, 2).map((tag) => <i key={tag}>{tag}</i>)}</div>
+            </button>
+          ))}
+        </div>
+        {active ? (
+          <article className="panel source-dossier">
+            <div className="dossier-index">SOURCE / {String(sources.indexOf(active) + 1).padStart(2, '0')}</div>
+            <div className="panel-label"><BookCopy size={17} /> {active.kind} · {active.organization}</div>
+            <h2>{active.title}</h2>
+            <p className="dossier-summary">{active.description}</p>
+            <dl>
+              <div><dt>语言</dt><dd>{active.language}</dd></div>
+              <div><dt>最近核验</dt><dd>{active.verifiedAt}</dd></div>
+              <div><dt>使用边界</dt><dd>{active.usageNote}</dd></div>
+            </dl>
+            <div className="tag-row">{active.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>
+            {active.url ? <a className="button primary inline-button" href={active.url} target="_blank" rel="noreferrer">打开原始来源 <ExternalLink size={16} /></a> : <div className="notice"><Info size={16} /><span>这项资源仍待接入和核验，当前不能作为正式术语依据。</span></div>}
+          </article>
+        ) : <EmptyState icon={Database} title="没有匹配的资料" text="切换资源类型查看其他条目。" />}
+      </div>
+      <div className="boundary-note"><ShieldCheck size={18} /><p><strong>不是“上传即可信”。</strong> 知识书架负责组织来源和版本；具体术语在用于译文前，仍需回到原始文件和适用语境核验。</p></div>
     </div>
   )
 }
@@ -628,15 +699,21 @@ function Studio({ tasks, activeTask, onSelectTask, onUpdate, onSubmitDraft, onDe
   )
 }
 
-function Notebook({ cards, onReview }: { cards: ExpressionCard[]; onReview: (card: ExpressionCard, remembered: boolean) => void }) {
+function Notebook({ cards, onReview, onPractice }: { cards: ExpressionCard[]; onReview: (card: ExpressionCard, remembered: boolean) => void; onPractice: (card: ExpressionCard, response: string) => void }) {
   const due = cards.filter((card) => dueToday(card.nextReviewAt))
   const [activeId, setActiveId] = useState(due[0]?.id ?? cards[0]?.id)
   const active = cards.find((card) => card.id === activeId)
   const [revealed, setRevealed] = useState(false)
-  useEffect(() => setRevealed(false), [activeId])
+  const [mode, setMode] = useState<'recall' | 'transfer'>('recall')
+  const [practiceText, setPracticeText] = useState('')
+  const [practiceSaved, setPracticeSaved] = useState(false)
+  useEffect(() => { setRevealed(false); setPracticeText(''); setPracticeSaved(false) }, [activeId, mode])
   return (
     <div className="stack-lg">
-      <PageIntro kicker="表达沉淀" title="表达手账" text="收藏不是终点。把表达放回语境中回忆、判断并迁移。" />
+      <div className="notebook-heading">
+        <PageIntro kicker="检索练习" title="表达手账" text="收藏不是终点。先从记忆中提取，再把表达迁移到新的翻译语境。" />
+        <div className="practice-switch"><button className={mode === 'recall' ? 'active' : ''} onClick={() => setMode('recall')}>语境回忆</button><button className={mode === 'transfer' ? 'active' : ''} onClick={() => setMode('transfer')}>迁移改写</button></div>
+      </div>
       <section className="notebook-stats"><div><strong>{cards.length}</strong><span>累计表达</span></div><div><strong>{due.length}</strong><span>今日待复习</span></div><div><strong>{cards.filter((card) => card.level >= 3).length}</strong><span>进入长期记忆</span></div></section>
       {active ? (
         <div className="notebook-layout">
@@ -645,14 +722,23 @@ function Notebook({ cards, onReview }: { cards: ExpressionCard[]; onReview: (car
             {cards.map((card) => <button key={card.id} onClick={() => setActiveId(card.id)} className={card.id === active.id ? 'active' : ''}><div><strong>{card.expression}</strong><small>{dueToday(card.nextReviewAt) ? '今日到期' : `下次：${dateLabel(card.nextReviewAt)}`}</small></div><span>L{card.level}</span></button>)}
           </div>
           <div className="flashcard-panel">
-            <div className="flashcard">
-              <span className="kicker">语境回忆 · Level {active.level}</span>
-              <h2>{active.expression}</h2>
-              <p className="context">{active.context}</p>
-              <div className={revealed ? 'answer revealed' : 'answer'}><small>参考含义</small><strong>{revealed ? active.meaning : '先在心里完成回忆'}</strong></div>
-              <div className="flash-source"><Link2 size={15} />{active.sourceLabel}</div>
-            </div>
-            {!revealed ? <button className="button primary" onClick={() => setRevealed(true)}>显示参考答案</button> : <div className="review-actions"><button onClick={() => { onReview(active, false); setRevealed(false) }}><RotateCcw size={17} />需要巩固</button><button onClick={() => { onReview(active, true); setRevealed(false) }}><Check size={17} />记得并会用</button></div>}
+            {mode === 'recall' ? <>
+              <div className="flashcard">
+                <span className="kicker">语境回忆 · Level {active.level}</span>
+                <h2>{active.expression}</h2>
+                <p className="context">{active.context}</p>
+                <div className={revealed ? 'answer revealed' : 'answer'}><small>参考含义</small><strong>{revealed ? active.meaning : '先在心里完成回忆'}</strong></div>
+                <div className="flash-source"><Link2 size={15} />{active.sourceLabel}</div>
+              </div>
+              {!revealed ? <button className="button proof-button" onClick={() => setRevealed(true)}>显示参考答案</button> : <div className="review-actions"><button onClick={() => { onReview(active, false); setRevealed(false) }}><RotateCcw size={17} />需要巩固</button><button onClick={() => { onReview(active, true); setRevealed(false) }}><Check size={17} />记得并会用</button></div>}
+            </> : <div className="transfer-sheet">
+              <span className="kicker">迁移改写 · 不显示标准答案</span>
+              <h2>用上这条表达，完成一个新的译文判断。</h2>
+              <div className="transfer-expression"><small>本轮表达</small><strong>{active.expression}</strong><span>{active.meaning}</span></div>
+              <p>提示：为“高校在引入自动化评价工具时仍需保留人的最终判断”写一句审慎的英文表述，并说明适用读者。</p>
+              <textarea value={practiceText} onChange={(event) => { setPracticeText(event.target.value); setPracticeSaved(false) }} placeholder="先独立完成一句表达，再写下你的语体或读者判断……" />
+              <button className="button primary" disabled={practiceText.trim().length < 12 || practiceSaved} onClick={() => { onPractice(active, practiceText.trim()); setPracticeSaved(true) }}>{practiceSaved ? <Check size={17} /> : <Save size={17} />}{practiceSaved ? '已写入学习记忆' : '保存迁移尝试'}</button>
+            </div>}
           </div>
         </div>
       ) : <EmptyState icon={BookMarked} title="表达手账还是空的" text="在处理反馈时，把有价值的表达收藏到这里。" />}
@@ -663,15 +749,23 @@ function Notebook({ cards, onReview }: { cards: ExpressionCard[]; onReview: (car
 function ProcessArchive({ workspace }: { workspace: WorkspaceState }) {
   const completed = workspace.tasks.filter((task) => task.stage === 'complete')
   const decisionCount = workspace.tasks.reduce((sum, task) => sum + task.feedback.filter((item) => item.status !== 'pending').length, 0)
+  const reflections = completed.filter((task) => task.reflection.trim()).slice(0, 3)
+  const recentDecision = workspace.logs.find((entry) => entry.type === 'decision')
   return (
     <div className="stack-lg">
-      <PageIntro kicker="过程证据" title="学习与研究档案" text="每条记录都回答一个问题：学生做了什么决定，为什么，以及依据来自哪里。" />
+      <PageIntro kicker="三层学习记忆" title="学习记忆与研究档案" text="工作台记住当前任务、翻译决定和可迁移策略，而不是无差别保存所有对话。" />
+      <section className="memory-layers">
+        <article><span>L1 · 当前上下文</span><strong>{workspace.tasks.find((task) => task.stage !== 'complete')?.title ?? '暂无进行中的任务'}</strong><p>服务眼前任务，随版本更新。</p></article>
+        <article><span>L2 · 决策证据</span><strong>{recentDecision?.title ?? '尚未形成反馈决策'}</strong><p>{decisionCount} 条采纳或拒绝记录，可回到具体任务。</p></article>
+        <article><span>L3 · 可迁移策略</span><strong>{reflections[0]?.reflection || '完成任务反思后在这里沉淀策略'}</strong><p>只保留学习者明确写下的判断，不由系统替你推断。</p></article>
+      </section>
       <section className="archive-summary">
         <div><FileClock size={22} /><span>事件记录<strong>{workspace.logs.length}</strong></span></div>
         <div><ListChecks size={22} /><span>反馈决策<strong>{decisionCount}</strong></span></div>
         <div><CheckCircle2 size={22} /><span>完整任务<strong>{completed.length}</strong></span></div>
         <div><Link2 size={22} /><span>可追溯来源<strong>{new Set(workspace.tasks.map((task) => task.sourceName)).size}</strong></span></div>
       </section>
+      {reflections.length > 0 && <section className="strategy-board"><div className="section-heading"><div><span>来自已归档任务</span><h2>策略便笺</h2></div><Brain size={20} /></div><div>{reflections.map((task) => <blockquote key={task.id}><p>{task.reflection}</p><cite>{task.title}</cite></blockquote>)}</div></section>}
       <section className="panel timeline-panel">
         <div className="section-heading"><div><span>按时间倒序</span><h2>过程时间线</h2></div><span className="data-note">仅显示当前浏览器数据</span></div>
         <div className="timeline">
