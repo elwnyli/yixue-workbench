@@ -3,7 +3,7 @@ import type { Feedback, QuickSession, WorkspaceSettings } from '../types'
 
 export interface AIResult { reference: string; feedback: Feedback[]; provider: 'demo' | 'deepseek-proxy' }
 
-const fallbackReference = (source: string) => {
+export const getDemoReference = (source: string) => {
   const known: Array<[RegExp, string]> = [
     [/Human oversight remains essential/i, '当自动化系统影响与人相关的决策时，人工监督仍然不可或缺。'],
     [/Educational uses of AI should strengthen human agency/i, '人工智能在教育中的应用应增强人的能动性，并促进透明度与问责。'],
@@ -30,10 +30,10 @@ export const runAI = async (session: QuickSession, settings: WorkspaceSettings):
       const payload = await response.json() as { reference?: string; feedback?: Feedback[] }
       return { reference: payload.reference ?? '', feedback: payload.feedback ?? [], provider: 'deepseek-proxy' }
     } catch {
-      return { reference: fallbackReference(session.source), feedback: demoFeedback(session), provider: 'demo' }
+      return { reference: getDemoReference(session.source), feedback: demoFeedback(session), provider: 'demo' }
     }
   }
-  return { reference: fallbackReference(session.source), feedback: demoFeedback(session), provider: 'demo' }
+  return { reference: getDemoReference(session.source), feedback: demoFeedback(session), provider: 'demo' }
 }
 
 export const detectLanguage = (text: string) => /[\u4e00-\u9fff]/.test(text) ? '中文' : /[A-Za-z]/.test(text) ? '英语' : '待确认'
