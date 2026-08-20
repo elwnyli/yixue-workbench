@@ -74,7 +74,7 @@ export const seedWorkspace: Workspace = {
   aiRequestLogs: [],
   batchJobs: [],
   qualityIssues: [],
-  settings: { theme: 'light', learnerName: '译学者', provider: 'demo', model: 'deepseek-chat', endpoint: '', temperature: 0.3, requestLimit: 6000, batchSize: 12, requestTimeoutMs: 30000, retryCount: 2, contentProxyEndpoint: '', autoSave: true },
+  settings: { theme: 'light', learnerName: '译学者', provider: 'demo', model: 'deepseek-v4-flash', endpoint: '', temperature: 0.3, requestLimit: 6000, batchSize: 12, requestTimeoutMs: 30000, retryCount: 2, contentProxyEndpoint: '', autoSave: true },
   lastSavedAt: now,
 }
 

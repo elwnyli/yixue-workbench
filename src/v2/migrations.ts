@@ -139,11 +139,13 @@ const migrateContentItem = (value: unknown, index: number): ContentItem => {
 
 const migrateSettings = (value: unknown, seed: WorkspaceSettings): WorkspaceSettings => {
   const settings = isRecord(value) ? value : {}
+  const storedModel = asString(settings.model, seed.model)
+  const model = storedModel === 'deepseek-chat' ? 'deepseek-v4-flash' : storedModel === 'deepseek-reasoner' ? 'deepseek-v4-pro' : storedModel
   return {
     theme: asString(settings.theme, seed.theme) as WorkspaceSettings['theme'],
     learnerName: asString(settings.learnerName, seed.learnerName),
     provider: asString(settings.provider, seed.provider) as WorkspaceSettings['provider'],
-    model: asString(settings.model, seed.model),
+    model,
     endpoint: asString(settings.endpoint),
     temperature: asNumber(settings.temperature, seed.temperature),
     requestLimit: asNumber(settings.requestLimit, seed.requestLimit),

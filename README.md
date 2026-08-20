@@ -55,6 +55,8 @@ GitHub Pages 会在推送后发布新的静态文件。
 
 公开网页中不能存放模型 API 密钥。设置页支持填写一个自有服务器端点，前端发送：
 
+仓库内已经提供可部署到 Railway 的安全代理，参见 [`proxy/README.md`](proxy/README.md)。真实 Key 只填入部署平台的私密环境变量，不能粘贴到工作台、聊天或 GitHub 文件。
+
 ```json
 {
   "task": {
@@ -71,7 +73,7 @@ V2 前端发送：
 ```json
 {
   "action": "translate-and-review",
-  "model": "deepseek-chat",
+  "model": "deepseek-v4-flash",
   "temperature": 0.3,
   "session": {
     "source": "...",

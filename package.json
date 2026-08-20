@@ -9,7 +9,7 @@
     "build": "tsc -b && vite build",
     "deploy:build": "tsc -b && vite build --outDir docs",
     "check": "tsc -b --pretty false",
-    "test": "vitest run",
+    "test": "vitest run && node --test proxy/core.test.mjs",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "preview": "vite preview"
