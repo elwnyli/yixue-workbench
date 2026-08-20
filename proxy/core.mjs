@@ -55,9 +55,15 @@ export const handleAction = async (body, options = {}) => {
   }
 
   if (action === 'translate-segments') {
+    const translationContext = {
+      sourceLanguage: clip(body?.sourceLanguage, 100),
+      targetLanguage: clip(body?.targetLanguage, 100),
+      domain: clip(body?.domain, 200),
+    }
     const segments = Array.isArray(body?.segments) ? body.segments.slice(0, 20).map((item) => ({ segmentId: clip(item?.segmentId, 160), source: clip(item?.source, 8000), previousSource: clip(item?.previousSource, 1500), nextSource: clip(item?.nextSource, 1500), terms: Array.isArray(item?.terms) ? item.terms.slice(0, 30) : [] })).filter((item) => item.segmentId && item.source) : []
     if (!segments.length) throw new Error('没有可翻译片段')
-    const result = await invoke({ model, temperature: body?.temperature, messages: jsonMessages('逐段翻译。严格保留segmentId；使用已批准术语；不要合并、拆分或改变顺序。译文只是待人工确认草稿。', { segments }, { translations: [{ segmentId: '原ID', target: '目标语译文', error: '' }] }) })
+    if (!translationContext.targetLanguage) throw new Error('目标语言为空')
+    const result = await invoke({ model, temperature: body?.temperature, messages: jsonMessages('按照指定的源语言、目标语言和领域逐段翻译。严格保留segmentId；使用已批准术语；不要合并、拆分或改变顺序。译文只是待人工确认草稿。', { ...translationContext, segments }, { translations: [{ segmentId: '原ID', target: '目标语译文', error: '' }] }) })
     const requested = new Set(segments.map((item) => item.segmentId)); const seen = new Set()
     const translations = (Array.isArray(result.data?.translations) ? result.data.translations : []).flatMap((item) => { const segmentId = clip(item?.segmentId, 160); if (!requested.has(segmentId) || seen.has(segmentId)) return []; seen.add(segmentId); return [{ segmentId, target: clip(item?.target, 12000), requestId: result.id, error: clip(item?.error, 500) }] })
     return { translations, model: result.model, usage: result.usage }

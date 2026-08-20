@@ -14,9 +14,16 @@ test('connection test never exposes the API key', async () => {
 })
 
 test('batch translation maps only requested unique segment IDs', async () => {
-  const result = await handleAction({ action: 'translate-segments', model: 'deepseek-v4-flash', segments: [{ segmentId: 's1', source: 'One' }, { segmentId: 's2', source: 'Two' }] }, { apiKey: 'test', invoke: async () => ({ id: 'request-2', model: 'deepseek-v4-flash', data: { translations: [{ segmentId: 's2', target: '二' }, { segmentId: 'unknown', target: '错误' }, { segmentId: 's2', target: '重复' }, { segmentId: 's1', target: '一' }] } }) })
+  let capturedRequest
+  const result = await handleAction({ action: 'translate-segments', model: 'deepseek-v4-flash', sourceLanguage: '英语（en）', targetLanguage: '简体中文（zh-CN）', domain: '翻译教育', segments: [{ segmentId: 's1', source: 'One' }, { segmentId: 's2', source: 'Two' }] }, { apiKey: 'test', invoke: async (request) => { capturedRequest = request; return { id: 'request-2', model: 'deepseek-v4-flash', data: { translations: [{ segmentId: 's2', target: '二' }, { segmentId: 'unknown', target: '错误' }, { segmentId: 's2', target: '重复' }, { segmentId: 's1', target: '一' }] } } } })
   assert.deepEqual(result.translations.map((item) => item.segmentId), ['s2', 's1'])
   assert.deepEqual(result.translations.map((item) => item.target), ['二', '一'])
+  assert.match(capturedRequest.messages[1].content, /简体中文（zh-CN）/)
+  assert.match(capturedRequest.messages[1].content, /翻译教育/)
+})
+
+test('batch translation rejects a request without a target language', async () => {
+  await assert.rejects(() => handleAction({ action: 'translate-segments', segments: [{ segmentId: 's1', source: 'One' }] }, { apiKey: 'test', invoke: async () => { throw new Error('should not call') } }), /目标语言为空/)
 })
 
 test('term lookup forces sources to stay empty without retrieval', async () => {

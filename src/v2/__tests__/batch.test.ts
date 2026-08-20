@@ -37,6 +37,11 @@ describe('batch pretranslation', () => {
     expect(segments.find((segment) => segment.id === 'seg-demo-3')?.target).toBe('第三段译文')
     expect(result.job.status).toBe('completed')
     expect(result.job.completedSegmentIds).toEqual(expect.arrayContaining(['seg-demo-2', 'seg-demo-3']))
+    expect(translatorMock.mock.calls[0][0][0]).toMatchObject({
+      sourceLanguage: project.sourceLanguage,
+      targetLanguage: project.targetLanguage,
+      domain: project.domain,
+    })
   })
 
   it('uses exact translation memory before calling the model', async () => {

@@ -17,6 +17,9 @@ export interface BatchTranslationRequest {
   previousSource: string
   nextSource: string
   terms: Array<{ source: string; target: string }>
+  sourceLanguage: string
+  targetLanguage: string
+  domain: string
 }
 
 export interface BatchTranslationResult {
@@ -126,6 +129,9 @@ const requestForSegment = (project: Project, segment: Segment, terms: TermEntry[
     previousSource: index > 0 ? file?.segments[index - 1]?.source ?? '' : '',
     nextSource: index >= 0 ? file?.segments[index + 1]?.source ?? '' : '',
     terms: matchingTerms(segment.source, terms),
+    sourceLanguage: project.sourceLanguage,
+    targetLanguage: project.targetLanguage,
+    domain: project.domain,
   }
 }
 
@@ -146,7 +152,15 @@ export const requestBatchTranslations: BatchTranslator = async (requests, worksp
       const response = await fetch(workspace.settings.endpoint, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ action: 'translate-segments', model: workspace.settings.model, temperature: workspace.settings.temperature, segments: requests }),
+        body: JSON.stringify({
+          action: 'translate-segments',
+          model: workspace.settings.model,
+          temperature: workspace.settings.temperature,
+          sourceLanguage: requests[0]?.sourceLanguage ?? '',
+          targetLanguage: requests[0]?.targetLanguage ?? '',
+          domain: requests[0]?.domain ?? '',
+          segments: requests,
+        }),
         signal: controller.signal,
       })
       if (!response.ok) throw new Error(`服务返回 ${response.status}`)
