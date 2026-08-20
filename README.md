@@ -29,9 +29,13 @@ pnpm dev
 构建检查：
 
 ```bash
+pnpm check
 pnpm build
+pnpm test
 pnpm preview
 ```
+
+V2 数据带有独立的 `schemaVersion`。旧版 V2 IndexedDB 数据会先写入迁移备份区，再补齐新字段；迁移失败时不会用演示数据覆盖原工作区。测试结果持续记录在 `QA_REPORT.md`。
 
 ## GitHub Pages
 

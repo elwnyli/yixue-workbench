@@ -1,4 +1,4 @@
-import { createId } from '../data'
+import { createId, createSegment } from '../data'
 import type { ProjectFile, Segment } from '../types'
 
 const splitText = (text: string): Segment[] => {
@@ -7,9 +7,7 @@ const splitText = (text: string): Segment[] => {
     .split(/\n{2,}|(?<=[.!?。！？])\s+(?=[A-Z\u4e00-\u9fff])/)
     .map((item) => item.replace(/\s+/g, ' ').trim())
     .filter(Boolean)
-  return blocks.map((source, index) => ({
-    id: createId('segment'), order: index + 1, source, target: '', initialTarget: '', status: 'untranslated', origin: 'human', note: '', revisions: [],
-  }))
+  return blocks.map((source, index) => createSegment(createId('segment'), index + 1, source))
 }
 
 export const parseFile = async (file: File): Promise<ProjectFile> => {

@@ -1,3 +1,5 @@
+allowBuilds:
+  msw: false
 minimumReleaseAgeExclude:
   - '@vitejs/plugin-react@6.1.0'
   - lucide-react@1.33.0
