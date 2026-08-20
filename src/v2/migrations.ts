@@ -161,6 +161,8 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   if (!isRecord(value) || value.version !== 2) throw new Error('不是可识别的译学工作台 V2 数据')
   const seed = cloneSeed()
   const settings = migrateSettings(value.settings, seed.settings)
+  const existingSkills = asArray(value.skills, seed.skills)
+  const skills = [...existingSkills, ...seed.skills.filter((builtin) => !existingSkills.some((item) => isRecord(item) && item.id === builtin.id))] as Workspace['skills']
   return {
     version: 2,
     schemaVersion: CURRENT_SCHEMA_VERSION,
@@ -175,7 +177,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
     sources: asArray(value.sources, seed.sources),
     practices: asArray(value.practices),
     personalReferences: asArray(value.personalReferences),
-    skills: asArray(value.skills, seed.skills),
+    skills,
     skillExecutionLogs: asArray(value.skillExecutionLogs),
     aiRequestLogs: asArray(value.aiRequestLogs),
     batchJobs: asArray(value.batchJobs),

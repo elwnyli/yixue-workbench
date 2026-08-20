@@ -138,28 +138,33 @@ export const requestBatchTranslations: BatchTranslator = async (requests, worksp
     })
   }
 
-  const controller = new AbortController()
-  const timeout = window.setTimeout(() => controller.abort(), workspace.settings.requestTimeoutMs)
-  try {
-    const response = await fetch(workspace.settings.endpoint, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ action: 'translate-segments', model: workspace.settings.model, temperature: workspace.settings.temperature, segments: requests }),
-      signal: controller.signal,
-    })
-    if (!response.ok) throw new Error(`服务返回 ${response.status}`)
-    const payload = await response.json() as { translations?: Array<{ segmentId?: string; target?: string; requestId?: string; error?: string }> }
-    const requestedIds = new Set(requests.map((request) => request.segmentId))
-    const seen = new Set<string>()
-    return (payload.translations ?? []).flatMap((item) => {
-      const segmentId = item.segmentId ?? ''
-      if (!requestedIds.has(segmentId) || seen.has(segmentId)) return []
-      seen.add(segmentId)
-      return [{ segmentId, target: item.target ?? '', origin: 'deepseek' as const, requestId: item.requestId ?? createId('request'), error: item.error ?? '' }]
-    })
-  } finally {
-    window.clearTimeout(timeout)
+  let lastError: unknown
+  for (let attempt = 0; attempt <= workspace.settings.retryCount; attempt += 1) {
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), workspace.settings.requestTimeoutMs)
+    try {
+      const response = await fetch(workspace.settings.endpoint, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'translate-segments', model: workspace.settings.model, temperature: workspace.settings.temperature, segments: requests }),
+        signal: controller.signal,
+      })
+      if (!response.ok) throw new Error(`服务返回 ${response.status}`)
+      const payload = await response.json() as { translations?: Array<{ segmentId?: string; target?: string; requestId?: string; error?: string }> }
+      const requestedIds = new Set(requests.map((request) => request.segmentId))
+      const seen = new Set<string>()
+      return (payload.translations ?? []).flatMap((item) => {
+        const segmentId = item.segmentId ?? ''
+        if (!requestedIds.has(segmentId) || seen.has(segmentId)) return []
+        seen.add(segmentId)
+        return [{ segmentId, target: item.target ?? '', origin: 'deepseek' as const, requestId: item.requestId ?? createId('request'), error: item.error ?? '' }]
+      })
+    } catch (error) {
+      lastError = error
+      if (attempt >= workspace.settings.retryCount) throw error
+    } finally { window.clearTimeout(timeout) }
   }
+  throw lastError instanceof Error ? lastError : new Error('批量请求失败')
 }
 
 const updateProjectSegments = (project: Project, results: BatchTranslationResult[], attemptedIds: string[], now: string, provider: Workspace['settings']['provider']): Project => {
